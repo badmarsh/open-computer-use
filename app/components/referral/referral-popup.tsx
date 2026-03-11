@@ -144,8 +144,8 @@ export function ReferralPopup({ open, onOpenChange }: ReferralPopupProps) {
     typeof window !== "undefined"
       ? window.location.origin
       : "https://coasty.ai"
-  const referralLink = user ? `${baseUrl}/?ref=${user.id}` : ""
-  const displayLink = user
+  const referralLink = user?.id ? `${baseUrl}/?ref=${user.id}` : ""
+  const displayLink = user?.id
     ? `coasty.ai/?ref=${user.id.slice(0, 8)}...`
     : ""
 
@@ -169,7 +169,7 @@ export function ReferralPopup({ open, onOpenChange }: ReferralPopupProps) {
     }
   }, [open, user, fetchStats])
 
-  if (!user) return null
+  if (!user?.id) return null
 
   const handleCopy = async () => {
     try {

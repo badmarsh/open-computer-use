@@ -37,10 +37,11 @@ export async function getUserProfile(): Promise<UserProfile | null> {
     .from("users")
     .select("*, user_preferences(*)")
     .eq("id", user.id)
-    .single()
+    .maybeSingle()
 
-  // Don't load anonymous users in the user store
-  if (userProfileData?.anonymous) return null
+  // Anonymous sessions and missing profile rows should not hydrate the app
+  // shell with a partial user object.
+  if (!userProfileData?.id || userProfileData.anonymous) return null
 
   // Format user preferences if they exist
   const formattedPreferences = userProfileData?.user_preferences
