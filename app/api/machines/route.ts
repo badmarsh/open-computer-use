@@ -291,6 +291,8 @@ export async function POST(request: NextRequest) {
     const userId = authData.user.id;
     const body: CreateMachineRequest = await request.json();
     const provider = body.provider || 'azure';
+    const isAws = provider === 'aws';
+    const isSelfHosted = provider === 'selfhosted';
 
     // Validate request
     if (!body.displayName) {
@@ -311,7 +313,15 @@ export async function POST(request: NextRequest) {
       .not("status", "in", '("deleting","error")');
 
     const cloudMachineCount = (allUserMachines || []).filter((m: any) => {
-      const s = typeof m.settings === 'string' ? JSON.parse(m.settings) : (m.settings || {});
+      const s = typeof m.settings === 'string'
+        ? (() => {
+            try {
+              return JSON.parse(m.settings);
+            } catch {
+              return {};
+            }
+          })()
+        : (m.settings || {});
       return s.provider !== 'electron' && !s.isLocal;
     }).length;
 
@@ -404,8 +414,8 @@ export async function POST(request: NextRequest) {
       max_storage_gb: Math.max(limitsData.max_storage_gb || 0, baseLimits.max_storage_gb),
     } : baseLimits;
 
-    // Check cloud machine count against limit
-    if (cloudMachineCount >= effectiveLimits.max_machines) {
+    // Check cloud machine count against limit (self-hosted machines are excluded)
+    if (!isSelfHosted && cloudMachineCount >= effectiveLimits.max_machines) {
       return NextResponse.json(
         { error: "Machine limit reached for your account" },
         { status: 403 }
@@ -413,14 +423,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate resources against limits and minimum requirements
-    const isAws = provider === 'aws';
     const isDesktop = isAws && body.desktopEnabled;
-    const requestedCpu = isAws ? 2 : (body.cpuCores || 1);
-    const requestedMemory = isDesktop ? 2 : (isAws ? 0.5 : (body.memoryGb || 3));
-    const requestedStorage = body.storageGb || (isDesktop ? 16 : (isAws ? 8 : 10));
+    const requestedCpu = isSelfHosted ? 1 : (isAws ? 2 : (body.cpuCores || 1));
+    const requestedMemory = isSelfHosted ? 1 : (isDesktop ? 2 : (isAws ? 0.5 : (body.memoryGb || 3)));
+    const requestedStorage = isSelfHosted ? (body.storageGb || 1) : (body.storageGb || (isDesktop ? 16 : (isAws ? 8 : 10)));
 
     // Enforce minimum requirements (only for Azure)
-    if (!isAws && (requestedCpu < 1 || requestedMemory < 1)) {
+    if (!isAws && !isSelfHosted && (requestedCpu < 1 || requestedMemory < 1)) {
       return NextResponse.json(
         { error: "Minimum requirements: 1 CPU core and 1GB memory" },
         { status: 400 }
@@ -428,9 +437,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (
-      requestedCpu > effectiveLimits.max_cpu_cores ||
-      requestedMemory > effectiveLimits.max_memory_gb ||
-      requestedStorage > effectiveLimits.max_storage_gb
+      !isSelfHosted &&
+      (
+        requestedCpu > effectiveLimits.max_cpu_cores ||
+        requestedMemory > effectiveLimits.max_memory_gb ||
+        requestedStorage > effectiveLimits.max_storage_gb
+      )
     ) {
       return NextResponse.json(
         { error: "Requested resources exceed your limits" },
@@ -442,29 +454,61 @@ export async function POST(request: NextRequest) {
     const uniqueId = `${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const containerName = `vm-${userId.substring(0, 8)}-${uniqueId}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
     // Generate VNC password for Azure and AWS desktop machines
-    const needsVnc = !isAws || isDesktop;
+    const needsVnc = isSelfHosted || !isAws || isDesktop;
     const vncPassword = needsVnc
-      ? (Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8))
+      ? (body.vncPassword?.trim() || (Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8)))
       : '';
+    const selfHostedIp = body.publicIpAddress?.trim();
+    const selfHostedAgentPort = body.aiAgentPort ?? 8080;
+    const selfHostedVncPort = body.vncPort ?? 5901;
+    const selfHostedWebsocketPort = body.websocketPort ?? 6080;
+    const selfHostedSshPort = body.sshPort;
+
+    if (isSelfHosted && !selfHostedIp) {
+      return NextResponse.json(
+        { error: "Host or IP address is required for self-hosted machines" },
+        { status: 400 }
+      );
+    }
 
     // First, create a placeholder in the database so it appears immediately
     const placeholderData = {
       user_id: userId,
       container_name: containerName,
       display_name: body.displayName,
-      status: "creating" as const,
-      azure_resource_group: isAws ? '' : (process.env.AZURE_RESOURCE_GROUP || "coasty-resources"),
-      azure_container_group: isAws ? '' : containerName,
+      status: isSelfHosted ? ("running" as const) : ("creating" as const),
+      status_message: isSelfHosted
+        ? `Connected to self-hosted machine at ${selfHostedIp}`
+        : undefined,
+      azure_resource_group: isAws || isSelfHosted ? '' : (process.env.AZURE_RESOURCE_GROUP || "coasty-resources"),
+      azure_container_group: isAws || isSelfHosted ? '' : containerName,
+      public_ip_address: isSelfHosted ? selfHostedIp : undefined,
       vnc_password: vncPassword,
-      vnc_port: isDesktop ? 5901 : (isAws ? 0 : 5901),
-      websocket_port: isDesktop ? 6080 : (isAws ? 0 : 6080),
+      vnc_port: isSelfHosted ? selfHostedVncPort : (isDesktop ? 5901 : (isAws ? 0 : 5901)),
+      websocket_port: isSelfHosted ? selfHostedWebsocketPort : (isDesktop ? 6080 : (isAws ? 0 : 6080)),
+      ssh_port: isSelfHosted ? selfHostedSshPort : undefined,
       cpu_cores: requestedCpu,
       memory_gb: requestedMemory,
       storage_gb: requestedStorage,
       gpu_enabled: false,
-      settings: isAws
-        ? { provider: 'aws' as const, sshUsername: 'ubuntu', desktopEnabled: isDesktop }
-        : {},
+      started_at: isSelfHosted ? new Date().toISOString() : undefined,
+      settings: isSelfHosted
+        ? {
+            provider: 'selfhosted' as const,
+            isLocal: true,
+            host: selfHostedIp,
+            agentPort: selfHostedAgentPort,
+            sshPort: selfHostedSshPort,
+            ports: {
+              vnc: selfHostedVncPort,
+              websocket: selfHostedWebsocketPort,
+              agent: selfHostedAgentPort,
+              ssh: selfHostedSshPort,
+            },
+          }
+        : isAws
+          ? { provider: 'aws' as const, sshUsername: 'ubuntu', desktopEnabled: isDesktop }
+          : {},
     };
 
     const { data: dbMachine, error: insertError } = await supabase
@@ -489,6 +533,20 @@ export async function POST(request: NextRequest) {
 
     const machine = transformMachineFromDB(dbMachine);
     const machineId = machine?.id || dbMachine.id;
+
+    if (isSelfHosted) {
+      const host = selfHostedIp as string;
+      return NextResponse.json({
+        machine,
+        connectionDetails: {
+          vncUrl: `vnc://${host}:${selfHostedVncPort}`,
+          websocketUrl: `ws://${host}:${selfHostedWebsocketPort}`,
+          password: vncPassword,
+          sshHost: host,
+          sshPort: selfHostedSshPort,
+        },
+      });
+    }
 
     if (isAws) {
       // AWS EC2 creation flow

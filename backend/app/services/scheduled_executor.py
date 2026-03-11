@@ -184,6 +184,11 @@ async def _get_machine_connection_info(
             return None
 
         machine_settings = machine.get("settings", {})
+        if isinstance(machine_settings, str):
+            try:
+                machine_settings = json.loads(machine_settings)
+            except Exception:
+                machine_settings = {}
         if machine_settings.get("provider") == "electron":
             return {
                 "public_ip": "electron",
@@ -204,14 +209,14 @@ async def _get_machine_connection_info(
         if machine.get("status") != "running":
             return None
 
-        ms = machine.get("settings", {})
-        if ms.get("isLocal"):
+        ms = machine_settings
+        if ms.get("isLocal") or ms.get("provider") == "selfhosted":
             ports = ms.get("ports", {})
             public_ip = machine.get("public_ip_address", "localhost")
-            default_agent_port = 8081 if public_ip == "localhost" else 8080
+            default_agent_port = 8081 if public_ip in {"localhost", "127.0.0.1"} else 8080
             return {
                 "public_ip": public_ip,
-                "agent_port": ports.get("agent", default_agent_port),
+                "agent_port": ports.get("agent", ms.get("agentPort", ms.get("agent_port", default_agent_port))),
                 "vnc_port": ports.get("vnc", 5901),
                 "websocket_port": ports.get("websocket", 6080),
                 "machine_name": machine.get("display_name", "Local VM"),
@@ -219,11 +224,14 @@ async def _get_machine_connection_info(
                 "is_local": True,
             }
 
+        ports = ms.get("ports", {})
+        public_ip = machine.get("public_ip_address")
+        default_agent_port = 8081 if public_ip in {"localhost", "127.0.0.1"} else 8080
         return {
-            "public_ip": machine.get("public_ip_address"),
-            "agent_port": machine.get("ai_agent_port", 8080),
-            "vnc_port": machine.get("vnc_port", 5901),
-            "websocket_port": machine.get("websocket_port", 6080),
+            "public_ip": public_ip,
+            "agent_port": ports.get("agent", ms.get("agentPort", ms.get("agent_port", machine.get("ai_agent_port", default_agent_port)))),
+            "vnc_port": ports.get("vnc", machine.get("vnc_port", 5901)),
+            "websocket_port": ports.get("websocket", machine.get("websocket_port", 6080)),
             "machine_name": machine.get("display_name", "VM Desktop"),
             "vnc_password": machine.get("vnc_password"),
             "is_local": False,
@@ -408,7 +416,7 @@ async def execute_scheduled_chat(
             user_id=user_id,
             machine_id=machine_id,
             session_type="ai_controlled",
-            ai_model=model or settings.BEDROCK_DEFAULT_MODEL,
+            ai_model=provider_factory.resolve_model(model or provider_factory.get_default_model()),
             ai_objective=f"[SCHEDULED:{chat_id}] {task_prompt[:500]}",
         )
 
@@ -435,7 +443,7 @@ async def execute_scheduled_chat(
                     }
         else:
             public_ip = connection_info["public_ip"]
-            default_port = 8081 if public_ip == "localhost" else 8080
+            default_port = 8081 if public_ip in {"localhost", "127.0.0.1"} else 8080
             agent_port = connection_info.get("agent_port", default_port)
             await vm_control_service.connect_to_agent(
                 machine_id,
@@ -447,8 +455,8 @@ async def execute_scheduled_chat(
             )
 
         # 6. Initialize executor
-        bedrock_model = model or settings.BEDROCK_DEFAULT_MODEL
-        provider = provider_factory.get_provider(bedrock_model)
+        resolved_model = provider_factory.resolve_model(model or provider_factory.get_default_model())
+        provider = provider_factory.get_provider(resolved_model)
         provider.initialize()
 
         # Get chat title for shared memory tools
@@ -468,7 +476,7 @@ async def execute_scheduled_chat(
                 machine_id=machine_id,
                 connection_info=connection_info,
                 provider=provider,
-                model=bedrock_model,
+                model=resolved_model,
                 temperature=1.0,
                 max_tokens=None,
                 chat_id=chat_id,
@@ -481,7 +489,7 @@ async def execute_scheduled_chat(
                 machine_id=machine_id,
                 connection_info=connection_info,
                 provider=provider,
-                model=bedrock_model,
+                model=resolved_model,
                 temperature=1.0,
                 max_tokens=None,
                 chat_id=chat_id,
@@ -586,7 +594,7 @@ async def execute_scheduled_chat(
                                 chat_id=chat_id,
                                 content=step_content,
                                 tool_invocations=save_tools,
-                                model=bedrock_model,
+                                model=resolved_model,
                                 message_group_id=message_group_id,
                             )
                             if save_result:
@@ -625,7 +633,7 @@ async def execute_scheduled_chat(
                             chat_id=chat_id,
                             content=final_content,
                             tool_invocations=save_tools,
-                            model=bedrock_model,
+                            model=resolved_model,
                             message_group_id=message_group_id,
                         )
 
@@ -651,7 +659,7 @@ async def execute_scheduled_chat(
                     chat_id=chat_id,
                     content=all_content,
                     tool_invocations=save_tools,
-                    model=bedrock_model,
+                    model=resolved_model,
                     message_group_id=message_group_id,
                 )
 

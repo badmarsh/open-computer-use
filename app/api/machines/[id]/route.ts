@@ -106,8 +106,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const settings = machine.settings as any;
+    const settings = (() => {
+      if (typeof machine.settings === "string") {
+        try {
+          return JSON.parse(machine.settings);
+        } catch {
+          return {};
+        }
+      }
+      return (machine.settings as any) || {};
+    })();
     const isAws = settings?.provider === 'aws';
+    const isSelfHosted = settings?.provider === 'selfhosted';
 
     switch (body.action) {
       case "start":
@@ -131,7 +141,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             .update({ status: "starting", status_message: isAws ? "Starting machine..." : "Initializing container..." })
             .eq("id", machineId);
 
-          if (isAws) {
+          if (isSelfHosted) {
+            await supabase
+              .from("user_machines")
+              .update({
+                status: "running",
+                status_message: "Self-hosted machine marked as running",
+                started_at: machine.started_at || new Date().toISOString(),
+                last_active_at: new Date().toISOString(),
+              })
+              .eq("id", machineId);
+
+            return NextResponse.json({ message: "Machine started" });
+          } else if (isAws) {
             const awsService = getAwsEc2Service();
             const instanceId = settings?.awsInstanceId;
             if (!instanceId) {
@@ -211,7 +233,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           .update({ status: "stopping" })
           .eq("id", machineId);
 
-        if (isAws) {
+        if (isSelfHosted) {
+          await supabase
+            .from("user_machines")
+            .update({
+              status: "stopped",
+              status_message: "Self-hosted machine marked as stopped",
+              started_at: null,
+              last_active_at: new Date().toISOString(),
+            })
+            .eq("id", machineId);
+        } else if (isAws) {
           const awsService = getAwsEc2Service();
           const instanceId = settings?.awsInstanceId;
           if (instanceId) {
@@ -227,7 +259,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           .update({ status: "stopped", started_at: null })
           .eq("id", machineId);
 
-        await recordMachineUsage(machine);
+        if (!isSelfHosted) {
+          await recordMachineUsage(machine);
+        }
 
         return NextResponse.json({ message: "Machine stopped" });
 
@@ -243,7 +277,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           .update({ status: "stopping", status_message: "Restarting machine..." })
           .eq("id", machineId);
 
-        if (isAws) {
+        if (isSelfHosted) {
+          await supabase
+            .from("user_machines")
+            .update({
+              status: "running",
+              status_message: "Self-hosted machine restarted",
+              started_at: machine.started_at || new Date().toISOString(),
+              last_active_at: new Date().toISOString(),
+            })
+            .eq("id", machineId);
+
+          return NextResponse.json({ message: "Machine restarting" });
+        } else if (isAws) {
           const awsService = getAwsEc2Service();
           const instanceId = settings?.awsInstanceId;
           if (!instanceId) {
@@ -362,7 +408,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
             await awsService.terminateInstance(instanceId, keyPairName);
           }
-        } else {
+        } else if (!isSelfHosted) {
           const azureService = getAzureContainerService();
           await azureService.deleteContainer(machine.azure_container_group);
         }
@@ -545,9 +591,23 @@ async function recordMachineUsage(machine: any) {
 
     const cpuSeconds = machine.cpu_cores * durationHours * 3600;
     const memoryGbSeconds = machine.memory_gb * durationHours * 3600;
+    const machineSettings = (() => {
+      if (typeof machine.settings === "string") {
+        try {
+          return JSON.parse(machine.settings);
+        } catch {
+          return {};
+        }
+      }
+      return machine.settings || {};
+    })();
+
+    if (machineSettings?.provider === "selfhosted" || machineSettings?.provider === "electron" || machineSettings?.isLocal) {
+      return;
+    }
 
     let estimatedCost: number;
-    if ((machine.settings as any)?.provider === 'aws') {
+    if (machineSettings?.provider === 'aws') {
       const awsService = getAwsEc2Service();
       estimatedCost = awsService.estimateCost(
         process.env.AWS_EC2_INSTANCE_TYPE || 't4g.nano',

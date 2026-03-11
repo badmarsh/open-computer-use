@@ -53,11 +53,15 @@ export interface MachineSettings {
   allowClipboardSync?: boolean;
   customSoftware?: string[];
   isLocal?: boolean;
-  provider?: 'azure' | 'aws' | 'docker' | 'local' | 'electron';
+  provider?: 'azure' | 'aws' | 'docker' | 'local' | 'electron' | 'selfhosted';
+  host?: string;
+  agentPort?: number;
+  sshPort?: number;
   ports?: {
     vnc?: number;
     websocket?: number;
     agent?: number;
+    ssh?: number;
   };
   // AWS-specific
   awsInstanceId?: string;
@@ -177,12 +181,18 @@ export type AIActionType =
 // API Request/Response types
 export interface CreateMachineRequest {
   displayName: string;
-  provider?: 'azure' | 'aws';
+  provider?: 'azure' | 'aws' | 'selfhosted';
   cpuCores?: number;
   memoryGb?: number;
   storageGb?: number;
   desktopEnabled?: boolean;
   restoreFromSnapshot?: boolean;
+  publicIpAddress?: string;
+  vncPassword?: string;
+  vncPort?: number;
+  websocketPort?: number;
+  aiAgentPort?: number;
+  sshPort?: number;
 }
 
 export interface CreateMachineResponse {

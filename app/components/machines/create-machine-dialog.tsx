@@ -54,9 +54,16 @@ export function CreateMachineDialog({
 }: CreateMachineDialogProps) {
   const { isFreeTier, loading: subscriptionLoading } = useSubscription();
   const [creating, setCreating] = useState(false);
+  const [provider, setProvider] = useState<"aws" | "selfhosted">("aws");
   const [displayName, setDisplayName] = useState("");
   const [desktopEnabled, setDesktopEnabled] = useState(true);
   const [storageGb, setStorageGb] = useState(16);
+  const [selfHostedHost, setSelfHostedHost] = useState("");
+  const [selfHostedAgentPort, setSelfHostedAgentPort] = useState(8080);
+  const [selfHostedVncPort, setSelfHostedVncPort] = useState(5901);
+  const [selfHostedWebsocketPort, setSelfHostedWebsocketPort] = useState(6080);
+  const [selfHostedVncPassword, setSelfHostedVncPassword] = useState("desktop");
+  const [selfHostedSshPort, setSelfHostedSshPort] = useState(22);
   const [limits, setLimits] = useState<MachineLimits | null>(null);
   const [usage, setUsage] = useState<MachineUsage | null>(null);
   const [subscriptionTier, setSubscriptionTier] = useState<string | null>(null);
@@ -103,6 +110,7 @@ export function CreateMachineDialog({
 
   // Check if adding new resources would exceed limits
   const wouldExceedLimit = () => {
+    if (provider === "selfhosted") return false;
     if (!limits || !usage) return false;
 
     const memoryNeeded = desktopEnabled ? 2 : 0.5;
@@ -136,10 +144,25 @@ export function CreateMachineDialog({
       return;
     }
 
+    if (provider === "selfhosted" && !selfHostedHost.trim()) {
+      toast.error("Please enter a host or IP for self-hosted machine");
+      return;
+    }
+
     setCreating(true);
 
     // Store the values
-    const machineConfig = {
+    const machineConfig = provider === "selfhosted" ? {
+      displayName: displayName.trim(),
+      provider: "selfhosted" as const,
+      publicIpAddress: selfHostedHost.trim(),
+      aiAgentPort: selfHostedAgentPort,
+      vncPort: selfHostedVncPort,
+      websocketPort: selfHostedWebsocketPort,
+      vncPassword: selfHostedVncPassword || "desktop",
+      sshPort: selfHostedSshPort,
+      storageGb: 1,
+    } : {
       displayName: displayName.trim(),
       provider: 'aws' as const,
       storageGb,
@@ -156,20 +179,34 @@ export function CreateMachineDialog({
       });
 
       // Show immediate success and close dialog
-      const restoring = snapshotAvailable && restoreFromSnapshot;
-      toast.success(restoring ? "Restoring machine from snapshot!" : "Machine creation started!", {
-        description: restoring
+      const restoring = provider === "aws" && snapshotAvailable && restoreFromSnapshot;
+      toast.success(
+        provider === "selfhosted"
+          ? "Self-hosted machine added"
+          : restoring ? "Restoring machine from snapshot!" : "Machine creation started!",
+        {
+          description: provider === "selfhosted"
+            ? "Your external machine is now available in Coasty."
+            : restoring
           ? "Your previous desktop state is being restored. Ready in ~30 seconds."
           : desktopEnabled
             ? "Your desktop is launching. Ready in ~30 seconds."
             : "Your cloud machine is launching. SSH key will be available once ready.",
-        duration: 5000,
-      });
+          duration: 5000,
+        }
+      );
 
       // Reset form for next time
+      setProvider("aws");
       setDisplayName("");
       setDesktopEnabled(true);
       setStorageGb(16);
+      setSelfHostedHost("");
+      setSelfHostedAgentPort(8080);
+      setSelfHostedVncPort(5901);
+      setSelfHostedWebsocketPort(6080);
+      setSelfHostedVncPassword("desktop");
+      setSelfHostedSshPort(22);
       setCreating(false);
 
       // Close dialog immediately
@@ -190,7 +227,7 @@ export function CreateMachineDialog({
         } else {
           // Machine created successfully - list will auto-update via polling
           const data = await response.json();
-          trackVmCreated(data.machine.id, "azure");
+          trackVmCreated(data.machine.id, provider);
           console.log("Machine created successfully:", data.machine.id);
         }
       }).catch((error) => {
@@ -224,7 +261,9 @@ export function CreateMachineDialog({
             )}
           </div>
           <DialogDescription>
-            Launch a cloud desktop — ready in ~30 seconds
+            {provider === "selfhosted"
+              ? "Attach your own machine by host/IP and agent ports"
+              : "Launch a cloud desktop — ready in ~30 seconds"}
           </DialogDescription>
         </DialogHeader>
 
@@ -256,7 +295,7 @@ export function CreateMachineDialog({
         )}
 
         {/* Limit reached notice */}
-        {!loadingLimits && wouldExceedLimit() && (
+        {!loadingLimits && provider !== "selfhosted" && wouldExceedLimit() && (
           <p className="text-sm text-muted-foreground rounded-lg border border-border bg-muted/40 px-4 py-3">
             You've reached your machine limit. Stop or delete an existing machine to create a new one.{" "}
             <a href="/account?section=billing" className="font-medium text-foreground hover:opacity-80 transition-opacity">
@@ -266,12 +305,35 @@ export function CreateMachineDialog({
         )}
 
         <div className="space-y-6 py-4">
+          {/* Provider */}
+          <div className="space-y-2">
+            <Label>Machine Type</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={provider === "aws" ? "default" : "outline"}
+                onClick={() => setProvider("aws")}
+                disabled={creating}
+              >
+                Cloud (AWS)
+              </Button>
+              <Button
+                type="button"
+                variant={provider === "selfhosted" ? "default" : "outline"}
+                onClick={() => setProvider("selfhosted")}
+                disabled={creating}
+              >
+                Self-hosted
+              </Button>
+            </div>
+          </div>
+
           {/* Machine Name */}
           <div className="space-y-2">
             <Label htmlFor="name">Machine Name</Label>
             <Input
               id="name"
-              placeholder="My Cloud Server"
+              placeholder={provider === "selfhosted" ? "My Browser VM" : "My Cloud Server"}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               disabled={creating}
@@ -287,11 +349,83 @@ export function CreateMachineDialog({
           {/* Machine Info */}
           <div className="flex items-center gap-3 rounded-lg border p-3 bg-muted/30">
             <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <p className="text-xs text-muted-foreground">Ubuntu desktop, accessible via browser. Ready in ~30 seconds.</p>
+            <p className="text-xs text-muted-foreground">
+              {provider === "selfhosted"
+                ? "Connect an already running machine agent. Coasty will use your host and ports."
+                : "Ubuntu desktop, accessible via browser. Ready in ~30 seconds."}
+            </p>
           </div>
 
+          {provider === "selfhosted" && (
+            <div className="space-y-4 rounded-lg border p-3">
+              <div className="space-y-2">
+                <Label htmlFor="selfhosted-host">Host or IP</Label>
+                <Input
+                  id="selfhosted-host"
+                  placeholder="10.0.0.15 or machine.example.com"
+                  value={selfHostedHost}
+                  onChange={(e) => setSelfHostedHost(e.target.value)}
+                  disabled={creating}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="selfhosted-agent-port">Agent Port</Label>
+                  <Input
+                    id="selfhosted-agent-port"
+                    type="number"
+                    value={selfHostedAgentPort}
+                    onChange={(e) => setSelfHostedAgentPort(Number(e.target.value) || 8080)}
+                    disabled={creating}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="selfhosted-vnc-port">VNC Port</Label>
+                  <Input
+                    id="selfhosted-vnc-port"
+                    type="number"
+                    value={selfHostedVncPort}
+                    onChange={(e) => setSelfHostedVncPort(Number(e.target.value) || 5901)}
+                    disabled={creating}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="selfhosted-ws-port">WebSocket Port</Label>
+                  <Input
+                    id="selfhosted-ws-port"
+                    type="number"
+                    value={selfHostedWebsocketPort}
+                    onChange={(e) => setSelfHostedWebsocketPort(Number(e.target.value) || 6080)}
+                    disabled={creating}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="selfhosted-ssh-port">SSH Port</Label>
+                  <Input
+                    id="selfhosted-ssh-port"
+                    type="number"
+                    value={selfHostedSshPort}
+                    onChange={(e) => setSelfHostedSshPort(Number(e.target.value) || 22)}
+                    disabled={creating}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="selfhosted-vnc-password">VNC Password</Label>
+                <Input
+                  id="selfhosted-vnc-password"
+                  value={selfHostedVncPassword}
+                  onChange={(e) => setSelfHostedVncPassword(e.target.value)}
+                  disabled={creating}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Snapshot restore choice */}
-          {snapshotAvailable && (
+          {provider === "aws" && snapshotAvailable && (
             <div className="space-y-2">
               <Label>Machine State</Label>
               <div className="grid grid-cols-2 gap-2">
@@ -348,7 +482,13 @@ export function CreateMachineDialog({
           </Button>
           <Button 
             onClick={handleCreate} 
-            disabled={creating || !displayName.trim() || displayName.trim().toLowerCase().startsWith("local") || wouldExceedLimit()}
+            disabled={
+              creating ||
+              !displayName.trim() ||
+              displayName.trim().toLowerCase().startsWith("local") ||
+              (provider === "selfhosted" && !selfHostedHost.trim()) ||
+              wouldExceedLimit()
+            }
           >
             {creating ? (
               <>

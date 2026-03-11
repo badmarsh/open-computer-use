@@ -2,6 +2,7 @@
 File operations API endpoints for VM file transfer
 """
 import base64
+import json
 import logging
 import shlex
 from typing import Dict, Any, Optional, List
@@ -43,6 +44,13 @@ async def verify_machine_access(machine_id: str, user_id: Optional[str]) -> Opti
         machine = await db_service.get_machine(machine_id, user_id)
         if machine:
             logger.info(f"User {user_id} has access to machine {machine_id}")
+            settings = machine.get("settings", {})
+            if isinstance(settings, str):
+                try:
+                    settings = json.loads(settings)
+                except Exception:
+                    settings = {}
+            machine["settings"] = settings
             return machine
         else:
             logger.warning(f"User {user_id} does not have access to machine {machine_id}")
@@ -56,6 +64,14 @@ async def ensure_machine_connection(machine_details: Dict) -> bool:
     """Ensure connection to the machine"""
     try:
         machine_id = machine_details["id"]
+        settings = machine_details.get("settings", {}) or {}
+        if isinstance(settings, str):
+            try:
+                settings = json.loads(settings)
+            except Exception:
+                settings = {}
+        ports = settings.get("ports", {}) if isinstance(settings, dict) else {}
+
         # Use the correct field names from database schema
         public_ip = machine_details.get("public_ip_address")
         vnc_password = machine_details.get("vnc_password")
@@ -65,8 +81,9 @@ async def ensure_machine_connection(machine_details: Dict) -> bool:
             public_ip = "localhost"
             agent_port = 8081  # Local development port
         else:
-            # For Azure containers, use the public IP and port 8080 (AI agent server port)
-            agent_port = 8080  # AI agent server runs on 8080, not websocket_port (6080) which is for VNC
+            # Respect machine-specific agent port (self-hosted or local overrides), then fallback.
+            default_port = 8081 if public_ip in {"localhost", "127.0.0.1"} else 8080
+            agent_port = ports.get("agent", settings.get("agentPort", settings.get("agent_port", default_port)))
             
         if not public_ip:
             logger.error(f"No public IP address found for machine {machine_id}")

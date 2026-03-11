@@ -74,6 +74,7 @@ export function MachineCard({ machine, onUpdate, onDelete }: MachineCardProps) {
   const isLocal = machine.settings?.isLocal || machine.id.startsWith('local-');
   const isElectron = machine.settings?.provider === 'electron';
   const isAws = machine.settings?.provider === 'aws';
+  const isSelfHosted = machine.settings?.provider === 'selfhosted';
 
   // Update time remaining for free tier users
   useEffect(() => {
@@ -313,9 +314,22 @@ export function MachineCard({ machine, onUpdate, onDelete }: MachineCardProps) {
                     SSH
                   </Badge>
                 )}
+                {isSelfHosted && (
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal gap-1">
+                    Self-hosted
+                  </Badge>
+                )}
               </CardTitle>
               <CardDescription className="text-xs truncate pr-2">
-                {isElectron ? `Connected via Desktop App` : isLocal ? `Local Docker: ${machine.containerName}` : isAws ? `Cloud Machine - SSH` : machine.containerName}
+                {isElectron
+                  ? "Connected via Desktop App"
+                  : isSelfHosted
+                    ? `Self-hosted: ${machine.publicIpAddress || machine.containerName}`
+                    : isLocal
+                      ? `Local Docker: ${machine.containerName}`
+                      : isAws
+                        ? "Cloud Machine - SSH"
+                        : machine.containerName}
               </CardDescription>
             </div>
             <DropdownMenu>

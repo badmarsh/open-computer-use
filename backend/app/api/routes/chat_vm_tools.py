@@ -47,7 +47,7 @@ def create_comprehensive_vm_tools(machine_id: str, connection_info: Optional[Dic
         if vm_info.get("public_ip"):
             # Determine default port based on IP (8081 for localhost, 8080 for others)
             public_ip = vm_info.get("public_ip", "")
-            default_port = 8081 if public_ip == "localhost" else 8080
+            default_port = 8081 if public_ip in {"localhost", "127.0.0.1"} else 8080
             agent_port = vm_info.get("agent_port", default_port)
             
             logger.info(f"Establishing connection to VM {machine_id} at {public_ip}:{agent_port}")

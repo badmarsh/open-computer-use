@@ -73,8 +73,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     
     try {
       if (machine.public_ip_address) {
-        // AI agent runs on port 8080 by default
-        const aiAgentPort = (machine as any).ai_agent_port || 8080;
+        const settings = (() => {
+          if (typeof (machine as any).settings === "string") {
+            try {
+              return JSON.parse((machine as any).settings);
+            } catch {
+              return {};
+            }
+          }
+          return (machine as any).settings || {};
+        })();
+        const ports = settings?.ports || {};
+        // AI agent runs on port 8080 by default, but self-hosted/local machines may override it.
+        const aiAgentPort = ports.agent || settings?.agentPort || settings?.agent_port || (machine as any).ai_agent_port || 8080;
         console.log(`Machine ports - VNC: ${(machine as any).vnc_port}, WebSocket: ${(machine as any).websocket_port}, AI Agent: ${aiAgentPort}`);
         
         screenshotData = await captureVMScreenshot(

@@ -38,8 +38,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ agentReady: false, reason: "not_running" });
     }
 
-    const settings = machine.settings as any;
-    const agentPort = settings?.agent_port || 8080;
+    const settings = (() => {
+      if (typeof machine.settings === "string") {
+        try {
+          return JSON.parse(machine.settings);
+        } catch {
+          return {};
+        }
+      }
+      return (machine.settings as any) || {};
+    })();
+    const ports = settings?.ports || {};
+    const agentPort = ports.agent || settings?.agentPort || settings?.agent_port || 8080;
 
     // Quick WebSocket ping — 3 second timeout
     const ready = await pingAgent(machine.public_ip_address, agentPort);

@@ -94,7 +94,7 @@ class VMControlService:
                     # Build WebSocket URL (port 8081 for localhost, 8080 for others)
                     # If port is explicitly provided, use it; otherwise apply localhost logic
                     actual_port = agent_port
-                    if public_ip == "localhost" and agent_port == 8080:
+                    if public_ip in {"localhost", "127.0.0.1"} and agent_port == 8080:
                         actual_port = 8081  # Override to 8081 for localhost
                     agent_url = f"ws://{public_ip}:{actual_port}"
                     logger.info(f"🔌 Establishing persistent connection to {agent_url} (attempt {self.reconnect_attempts[machine_id] + 1})")

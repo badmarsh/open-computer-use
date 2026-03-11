@@ -13,7 +13,6 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from app.core.config import settings
 from app.models.chat import ChatRequest
 from app.services.auth import validate_user, get_verified_user_id
 from app.services.database import DatabaseService
@@ -195,6 +194,11 @@ async def get_machine_connection_info(machine_id: str, user_id: str) -> Optional
         # "stopped" and removes session_data.  We still return Electron info
         # so the caller can wait for the app to reconnect instead of 404-ing.
         machine_settings = machine.get("settings", {})
+        if isinstance(machine_settings, str):
+            try:
+                machine_settings = json.loads(machine_settings)
+            except Exception:
+                machine_settings = {}
         if machine_settings.get("provider") == "electron":
             logger.info(
                 f"Machine {machine_id} is an Electron machine in DB "
@@ -221,15 +225,15 @@ async def get_machine_connection_info(machine_id: str, user_id: str) -> Optional
             return None
 
         # Check if it's marked as local in settings
-        settings = machine.get("settings", {})
-        if settings.get("isLocal"):
+        settings = machine_settings
+        if settings.get("isLocal") or settings.get("provider") == "selfhosted":
             ports = settings.get("ports", {})
             # Check if it's localhost - use port 8081, otherwise use configured port
             public_ip = machine.get("public_ip_address", "localhost")
-            default_agent_port = 8081 if public_ip == "localhost" else 8080
+            default_agent_port = 8081 if public_ip in {"localhost", "127.0.0.1"} else 8080
             return {
                 "public_ip": public_ip,
-                "agent_port": ports.get("agent", default_agent_port),
+                "agent_port": ports.get("agent", settings.get("agentPort", settings.get("agent_port", default_agent_port))),
                 "vnc_port": ports.get("vnc", 5901),
                 "websocket_port": ports.get("websocket", 6080),
                 "machine_name": machine.get("display_name", "Local VM"),
@@ -237,12 +241,15 @@ async def get_machine_connection_info(machine_id: str, user_id: str) -> Optional
                 "is_local": True
             }
         
-        # Azure machine
+        # Cloud machine
+        ports = settings.get("ports", {})
+        public_ip = machine.get("public_ip_address")
+        default_agent_port = 8081 if public_ip in {"localhost", "127.0.0.1"} else 8080
         return {
-            "public_ip": machine.get("public_ip_address"),
-            "agent_port": machine.get("ai_agent_port", 8080),
-            "vnc_port": machine.get("vnc_port", 5901),
-            "websocket_port": machine.get("websocket_port", 6080),
+            "public_ip": public_ip,
+            "agent_port": ports.get("agent", settings.get("agentPort", settings.get("agent_port", machine.get("ai_agent_port", default_agent_port)))),
+            "vnc_port": ports.get("vnc", machine.get("vnc_port", 5901)),
+            "websocket_port": ports.get("websocket", machine.get("websocket_port", 6080)),
             "machine_name": machine.get("display_name", "VM Desktop"),
             "vnc_password": machine.get("vnc_password"),  # Include password for authentication
             "is_local": False
@@ -301,8 +308,8 @@ async def chat_endpoint(
                 "created_at": datetime.utcnow().isoformat()
             })
         
-        # Get Bedrock provider (all models route through Bedrock)
-        provider = provider_factory.get_provider(chat_request.model)
+        resolved_model = provider_factory.resolve_model(chat_request.model)
+        provider = provider_factory.get_provider(resolved_model)
         provider.initialize()
         
         # Multi-agent execution with VM
@@ -335,7 +342,7 @@ async def chat_endpoint(
             user_id=user_id,
             machine_id=chat_request.machine_id,
             session_type="ai_controlled",
-            ai_model=chat_request.model,
+            ai_model=resolved_model,
             ai_objective=chat_request.messages[-1].content if chat_request.messages else None
         )
 
@@ -367,7 +374,7 @@ async def chat_endpoint(
             try:
                 # Use port 8081 for localhost, 8080 for others (unless explicitly set)
                 public_ip = connection_info["public_ip"]
-                default_port = 8081 if public_ip == "localhost" else 8080
+                default_port = 8081 if public_ip in {"localhost", "127.0.0.1"} else 8080
                 agent_port = connection_info.get("agent_port", default_port)
 
                 connected = await vm_control_service.connect_to_agent(
@@ -383,8 +390,8 @@ async def chat_endpoint(
             except Exception as e:
                 logger.error(f"Error connecting to VM: {str(e)}")
 
-        # Use the model from backend settings (env-configurable), not from frontend
-        bedrock_model = settings.BEDROCK_DEFAULT_MODEL
+        # Use provider-aware model resolution
+        execution_model = resolved_model or provider_factory.get_default_model()
 
         # Initialize executor — CUA or legacy multi-agent based on feature flag
         use_cua = os.environ.get("USE_CUA_EXECUTOR", "true").lower() == "true"
@@ -394,21 +401,21 @@ async def chat_endpoint(
                 machine_id=chat_request.machine_id,
                 connection_info=connection_info,
                 provider=provider,
-                model=bedrock_model,
+                model=execution_model,
                 temperature=1.0,
                 max_tokens=None,
             )
-            logger.info(f"Using CUA executor with model {bedrock_model}")
+            logger.info(f"Using CUA executor with model {execution_model}")
         else:
             executor = MultiAgentExecutor(
                 machine_id=chat_request.machine_id,
                 connection_info=connection_info,
                 provider=provider,
-                model=bedrock_model,
+                model=execution_model,
                 temperature=1.0,
                 max_tokens=None,
             )
-            logger.info(f"Using legacy multi-agent executor with model {bedrock_model}")
+            logger.info(f"Using legacy multi-agent executor with model {execution_model}")
 
         # Get user request and context
         user_request = chat_request.messages[-1].content if chat_request.messages else ""

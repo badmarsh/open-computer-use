@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: Optional[str] = Field(default=None)
     AWS_REGION: str = Field(default="us-east-1")
 
+    # LLM Provider Selection
+    # bedrock: use AWS Bedrock provider
+    # openai: use OpenAI-compatible chat completions endpoint (custom base URL supported)
+    LLM_PROVIDER: str = Field(default="bedrock")
+
+    # OpenAI-compatible Configuration
+    OPENAI_API_KEY: Optional[str] = Field(default=None)
+    OPENAI_BASE_URL: Optional[str] = Field(default=None)
+    OPENAI_DEFAULT_MODEL: str = Field(default="gpt-4o-mini")
+    OPENAI_AVAILABLE_MODELS: str = Field(default="gpt-4o-mini")
+
     # Bedrock Model Configuration (env-configurable with fallbacks)
     BEDROCK_DEFAULT_MODEL: str = Field(default="anthropic.claude-sonnet-4-20250514-v1:0")
     BEDROCK_GROUNDING_MODEL: str = Field(default="anthropic.claude-3-5-sonnet-20241022-v2:0")

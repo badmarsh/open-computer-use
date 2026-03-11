@@ -19,7 +19,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.core.config import settings
 from app.services.database import DatabaseService
 from app.services.vm_control import vm_control_service
 from app.services.agent_billing import agent_billing_service
@@ -94,9 +93,10 @@ async def _get_machine_connection_info(
         result = await asyncio.wait_for(
             loop.run_in_executor(
                 None,
-                lambda: db_service.client.table("machines")
+                lambda: db_service.client.table("user_machines")
                 .select("*")
                 .eq("id", machine_id)
+                .eq("user_id", user_id)
                 .maybe_single()
                 .execute(),
             ),
@@ -110,13 +110,19 @@ async def _get_machine_connection_info(
             return None
 
         ms = machine.get("settings", {})
-        if ms.get("isLocal"):
+        if isinstance(ms, str):
+            try:
+                ms = json.loads(ms)
+            except Exception:
+                ms = {}
+
+        if ms.get("isLocal") or ms.get("provider") == "selfhosted":
             ports = ms.get("ports", {})
             public_ip = machine.get("public_ip_address", "localhost")
-            default_agent_port = 8081 if public_ip == "localhost" else 8080
+            default_agent_port = 8081 if public_ip in {"localhost", "127.0.0.1"} else 8080
             return {
                 "public_ip": public_ip,
-                "agent_port": ports.get("agent", default_agent_port),
+                "agent_port": ports.get("agent", ms.get("agentPort", ms.get("agent_port", default_agent_port))),
                 "vnc_port": ports.get("vnc", 5901),
                 "websocket_port": ports.get("websocket", 6080),
                 "machine_name": machine.get("display_name", "Local VM"),
@@ -124,11 +130,14 @@ async def _get_machine_connection_info(
                 "is_local": True,
             }
 
+        ports = ms.get("ports", {})
+        public_ip = machine.get("public_ip_address")
+        default_agent_port = 8081 if public_ip in {"localhost", "127.0.0.1"} else 8080
         return {
-            "public_ip": machine.get("public_ip_address"),
-            "agent_port": machine.get("ai_agent_port", 8080),
-            "vnc_port": machine.get("vnc_port", 5901),
-            "websocket_port": machine.get("websocket_port", 6080),
+            "public_ip": public_ip,
+            "agent_port": ports.get("agent", ms.get("agentPort", ms.get("agent_port", machine.get("ai_agent_port", default_agent_port)))),
+            "vnc_port": ports.get("vnc", machine.get("vnc_port", 5901)),
+            "websocket_port": ports.get("websocket", machine.get("websocket_port", 6080)),
             "machine_name": machine.get("display_name", "VM Desktop"),
             "vnc_password": machine.get("vnc_password"),
             "is_local": False,
@@ -285,7 +294,7 @@ async def execute_delegation(
                     }
         elif not same_machine:
             public_ip = connection_info["public_ip"]
-            default_port = 8081 if public_ip == "localhost" else 8080
+            default_port = 8081 if public_ip in {"localhost", "127.0.0.1"} else 8080
             agent_port = connection_info.get("agent_port", default_port)
             await vm_control_service.connect_to_agent(
                 delegate_machine_id,
@@ -297,8 +306,8 @@ async def execute_delegation(
             )
 
         # 8. Create executor
-        bedrock_model = settings.BEDROCK_DEFAULT_MODEL
-        provider = provider_factory.get_provider(bedrock_model)
+        resolved_model = provider_factory.resolve_model(provider_factory.get_default_model())
+        provider = provider_factory.get_provider(resolved_model)
         provider.initialize()
 
         use_cua = os.environ.get("USE_CUA_EXECUTOR", "true").lower() == "true"
@@ -310,7 +319,7 @@ async def execute_delegation(
                 machine_id=delegate_machine_id,
                 connection_info=connection_info,
                 provider=provider,
-                model=bedrock_model,
+                model=resolved_model,
                 temperature=1.0,
                 max_tokens=None,
                 chat_id=target_chat_id,
@@ -323,7 +332,7 @@ async def execute_delegation(
                 machine_id=delegate_machine_id,
                 connection_info=connection_info,
                 provider=provider,
-                model=bedrock_model,
+                model=resolved_model,
                 temperature=1.0,
                 max_tokens=None,
                 chat_id=target_chat_id,
@@ -449,7 +458,7 @@ async def execute_delegation(
                 "chat_id": target_chat_id,
                 "role": "assistant",
                 "content": sanitize_content(all_content[:10000]),
-                "model": bedrock_model,
+                "model": resolved_model,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             })
         except Exception as e:

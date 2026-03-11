@@ -1,3 +1,5 @@
+import OpenAIIcon from "@/components/icons/openai"
+
 export type Provider = {
   id: string
   name: string
@@ -12,5 +14,11 @@ export const PROVIDERS: Provider[] = [
     name: "Amazon Bedrock",
     available: true,
     icon: () => null,
+  },
+  {
+    id: "openai",
+    name: "OpenAI Compatible",
+    available: true,
+    icon: OpenAIIcon,
   },
 ]

@@ -4,7 +4,7 @@ Uses boto3 bedrock-runtime client with AWS credentials from settings.
 """
 
 import logging
-from typing import Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import boto3
 
@@ -39,3 +39,24 @@ class BedrockProvider:
         )
         self.initialized = True
         logger.info(f"BedrockProvider initialized (region={self.aws_region})")
+
+    def get_available_models(self) -> List[str]:
+        """Return configured Bedrock models."""
+        return settings.get_bedrock_models_list()
+
+    async def stream_chat(
+        self,
+        messages: List[Dict[str, Any]],
+        model: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        max_steps: int = 1,
+        temperature: Optional[float] = 1.0,
+        max_tokens: Optional[int] = None,
+        **_: Any,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Bedrock streaming is not implemented in this branch."""
+        del messages, model, tools, max_steps, temperature, max_tokens
+        raise NotImplementedError(
+            "Bedrock stream_chat is not implemented in this branch. "
+            "Set LLM_PROVIDER=openai with OPENAI_BASE_URL/OPENAI_API_KEY to use a custom endpoint."
+        )

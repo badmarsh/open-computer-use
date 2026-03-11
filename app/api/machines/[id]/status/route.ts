@@ -40,8 +40,32 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const settings = machine.settings as any;
+    const settings = (() => {
+      if (typeof machine.settings === "string") {
+        try {
+          return JSON.parse(machine.settings);
+        } catch {
+          return {};
+        }
+      }
+      return (machine.settings as any) || {};
+    })();
     const isAws = settings?.provider === 'aws';
+    const isSelfHosted = settings?.provider === 'selfhosted';
+    const ports = settings?.ports || {};
+
+    if (isSelfHosted) {
+      return NextResponse.json({
+        status: machine.status,
+        message: machine.status_message || "Self-hosted machine",
+        ipAddress: machine.public_ip_address,
+        canStart: machine.status === "stopped" || machine.status === "error",
+        provider: "selfhosted",
+        agentPort: ports.agent ?? settings?.agentPort ?? settings?.agent_port ?? 8080,
+        vncPort: ports.vnc ?? machine.vnc_port ?? 5901,
+        websocketPort: ports.websocket ?? machine.websocket_port ?? 6080,
+      });
+    }
 
     if (isAws) {
       // AWS EC2 status check

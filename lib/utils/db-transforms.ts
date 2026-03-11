@@ -1,6 +1,15 @@
 // Transform database snake_case to TypeScript camelCase for machines
 export function transformMachineFromDB(dbMachine: any) {
   if (!dbMachine) return null;
+  const settings = typeof dbMachine.settings === "string"
+    ? (() => {
+        try {
+          return JSON.parse(dbMachine.settings);
+        } catch {
+          return {};
+        }
+      })()
+    : (dbMachine.settings || {});
   
   return {
     id: dbMachine.id,
@@ -21,7 +30,8 @@ export function transformMachineFromDB(dbMachine: any) {
     vncPassword: dbMachine.vnc_password,
     vncPort: dbMachine.vnc_port || 5901,
     websocketPort: dbMachine.websocket_port || 6080,
-    sshPort: dbMachine.ssh_port || (dbMachine.settings?.provider === 'aws' ? 22 : undefined),
+    aiAgentPort: settings?.ports?.agent || settings?.agentPort || settings?.agent_port || undefined,
+    sshPort: dbMachine.ssh_port || settings?.ports?.ssh || settings?.sshPort || (settings?.provider === 'aws' ? 22 : undefined),
     
     // Resources
     cpuCores: dbMachine.cpu_cores,
@@ -37,7 +47,7 @@ export function transformMachineFromDB(dbMachine: any) {
     autoShutdownMinutes: dbMachine.auto_shutdown_minutes || 30,
     
     // Settings
-    settings: dbMachine.settings || {},
+    settings,
   };
 }
 
