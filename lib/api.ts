@@ -222,47 +222,6 @@ export async function resetPassword(
   return data
 }
 
-/**
- * Signs in user with Google OAuth via Supabase
- */
-export async function signInWithGoogle(supabase: SupabaseClient) {
-  try {
-    const isDev = process.env.NODE_ENV === "development"
-
-    // Get base URL dynamically (will work in both browser and server environments)
-    const baseUrl = isDev
-      ? "http://localhost:3000"
-      : typeof window !== "undefined"
-        ? window.location.origin
-        : process.env.NEXT_PUBLIC_VERCEL_URL
-          ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
-          : APP_DOMAIN
-
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${baseUrl}/auth/callback`,
-        queryParams: {
-          access_type: "offline",
-          prompt: "consent",
-        },
-        // You can optionally specify a custom auth URL if you have a custom domain
-        // authUrl: process.env.NEXT_PUBLIC_SUPABASE_AUTH_URL || undefined,
-      },
-    })
-
-    if (error) {
-      throw error
-    }
-
-    // Return the provider URL
-    return data
-  } catch (err) {
-    // Error signing in with Google
-    throw err
-  }
-}
-
 export const getOrCreateGuestUserId = async (
   user: UserProfile | null
 ): Promise<string | null> => {

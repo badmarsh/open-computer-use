@@ -9,11 +9,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { signInWithGoogle } from "@/lib/api"
-import { createClient } from "@/lib/supabase/client"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
-import Image from "next/image"
-import { useState } from "react"
+import Link from "next/link"
 
 type DialogAuthProps = {
   open: boolean
@@ -21,39 +18,8 @@ type DialogAuthProps = {
 }
 
 export function DialogAuth({ open, setOpen }: DialogAuthProps) {
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
   if (!isSupabaseEnabled) {
     return null
-  }
-
-  const supabase = createClient()
-
-  if (!supabase) {
-    return null
-  }
-
-  const handleSignInWithGoogle = async () => {
-    try {
-      setIsLoading(true)
-      setError(null)
-
-      const data = await signInWithGoogle(supabase)
-
-      // Redirect to the provider URL
-      if (data?.url) {
-        window.location.href = data.url
-      }
-    } catch (err: unknown) {
-      console.error("Error signing in with Google:", err)
-      setError(
-        (err as Error).message ||
-          "An unexpected error occurred. Please try again."
-      )
-    } finally {
-      setIsLoading(false)
-    }
   }
 
   return (
@@ -64,30 +30,12 @@ export function DialogAuth({ open, setOpen }: DialogAuthProps) {
             Sign in to use it for free
           </DialogTitle>
           <DialogDescription className="pt-2 text-base">
-            Your wallet can relax - this is actually free. We promise we're not hiding fees in the Terms of Service.
+            Your wallet can relax. Sign in with email or magic link to save your work and keep going.
           </DialogDescription>
         </DialogHeader>
-        {error && (
-          <div className="bg-destructive/10 text-destructive rounded-md p-3 text-sm">
-            {error}
-          </div>
-        )}
         <DialogFooter className="mt-6 sm:justify-center">
-          <Button
-            variant="secondary"
-            className="w-full text-base"
-            size="lg"
-            onClick={handleSignInWithGoogle}
-            disabled={isLoading}
-          >
-            <img
-              src="https://www.google.com/favicon.ico"
-              alt="Google logo"
-              width={20}
-              height={20}
-              className="mr-2 size-4"
-            />
-            <span>{isLoading ? "Connecting..." : "Continue with Google"}</span>
+          <Button asChild className="w-full text-base" size="lg">
+            <Link href="/auth">Open sign-in page</Link>
           </Button>
         </DialogFooter>
       </DialogContent>
