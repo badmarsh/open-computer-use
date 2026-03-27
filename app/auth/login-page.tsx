@@ -4,8 +4,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
-  signInWithGoogle,
-  signInAnonymously,
   signUpWithEmail,
   signInWithEmail,
   signInWithMagicLink,
@@ -24,7 +22,6 @@ type AuthView = "sign-in" | "sign-up" | "magic-link" | "forgot-password"
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
-  const [isAnonymousLoading, setIsAnonymousLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [authView, setAuthView] = useState<AuthView>("sign-in")
@@ -48,62 +45,6 @@ export default function LoginPage() {
     setAuthView(view)
     setError(null)
     setSuccess(null)
-  }
-
-  async function handleSignInWithGoogle() {
-    const supabase = createClient()
-    if (!supabase) {
-      throw new Error("Supabase is not configured")
-    }
-
-    try {
-      setIsLoading(true)
-      setError(null)
-      setSuccess(null)
-
-      const data = await signInWithGoogle(supabase)
-
-      if (data?.url) {
-        trackSignIn("google")
-        window.location.href = data.url
-      }
-    } catch (err: unknown) {
-      console.error("Error signing in with Google:", err)
-      setError(
-        (err as Error).message ||
-          "An unexpected error occurred. Please try again."
-      )
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  async function handleSignInAnonymously() {
-    const supabase = createClient()
-    if (!supabase) {
-      throw new Error("Supabase is not configured")
-    }
-
-    try {
-      setIsAnonymousLoading(true)
-      setError(null)
-      setSuccess(null)
-
-      const data = await signInAnonymously(supabase)
-
-      if (data?.user) {
-        trackSignUp("anonymous")
-        router.push("/")
-      }
-    } catch (err: unknown) {
-      console.error("Error signing in anonymously:", err)
-      setError(
-        (err as Error).message ||
-          "An unexpected error occurred. Please try again."
-      )
-    } finally {
-      setIsAnonymousLoading(false)
-    }
   }
 
   async function handleEmailSignIn(e: React.FormEvent) {
@@ -295,38 +236,12 @@ export default function LoginPage() {
           )}
 
           <div className="space-y-4">
-            {/* Google OAuth Button */}
-            <Button
-              variant="secondary"
-              className="w-full text-base sm:text-base"
-              size="lg"
-              onClick={handleSignInWithGoogle}
-              disabled={isLoading || isAnonymousLoading}
-            >
-              <img
-                src="https://www.google.com/favicon.ico"
-                alt="Google logo"
-                width={20}
-                height={20}
-                className="mr-2 size-4"
-              />
-              <span>
-                {isLoading && authView === "sign-in" && !email
-                  ? "Connecting..."
-                  : "Continue with Google"}
-              </span>
-            </Button>
-
-            {/* Divider */}
-            <div className="relative flex items-center gap-4">
-              <div className="h-px flex-1 bg-border" />
-              <span className="text-xs text-muted-foreground">or continue with email</span>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-
             {/* Email Sign In */}
             {authView === "sign-in" && (
               <form onSubmit={handleEmailSignIn} className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Sign in with your email and password, or request a magic link instead.
+                </p>
                 <div className="space-y-1.5">
                   <Label htmlFor="email">Email</Label>
                   <Input
